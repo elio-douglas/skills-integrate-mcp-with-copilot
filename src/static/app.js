@@ -1,8 +1,57 @@
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   const activitiesList = document.getElementById("activities-list");
   const activitySelect = document.getElementById("activity");
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
+  const userMenuToggle = document.getElementById("user-menu-toggle");
+  const adminPanel = document.getElementById("admin-panel");
+  const adminStatusText = document.getElementById("admin-status-text");
+  const adminLoginBtn = document.getElementById("admin-login-btn");
+  const adminLogoutBtn = document.getElementById("admin-logout-btn");
+  const loginModal = document.getElementById("login-modal");
+  const adminLoginForm = document.getElementById("admin-login-form");
+  const loginCancelBtn = document.getElementById("login-cancel-btn");
+  const adminPasswordInput = document.getElementById("admin-password");
+
+  let isAdmin = false;
+
+  function showMessage(text, type) {
+    messageDiv.textContent = text;
+    messageDiv.className = type;
+    messageDiv.classList.remove("hidden");
+
+    setTimeout(() => {
+      messageDiv.classList.add("hidden");
+    }, 5000);
+  }
+
+  function renderAdminControls() {
+    adminStatusText.textContent = isAdmin ? "Admin Mode" : "Student Mode";
+    adminLoginBtn.classList.toggle("hidden", isAdmin);
+    adminLogoutBtn.classList.toggle("hidden", !isAdmin);
+  }
+
+  function openLoginModal() {
+    loginModal.classList.remove("hidden");
+    adminPasswordInput.focus();
+  }
+
+  function closeLoginModal() {
+    adminLoginForm.reset();
+    loginModal.classList.add("hidden");
+  }
+
+  async function fetchAdminStatus() {
+    try {
+      const response = await fetch("/admin/status");
+      const data = await response.json();
+      isAdmin = Boolean(data.is_admin);
+    } catch (error) {
+      isAdmin = false;
+      console.error("Error checking admin status:", error);
+    }
+    renderAdminControls();
+  }
 
   // Function to fetch activities from API
   async function fetchActivities() {
@@ -12,6 +61,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Clear loading message
       activitiesList.innerHTML = "";
+      activitySelect.innerHTML =
+        '<option value="">-- Select an activity --</option>';
 
       // Populate activities list
       Object.entries(activities).forEach(([name, details]) => {
@@ -22,20 +73,23 @@ document.addEventListener("DOMContentLoaded", () => {
           details.max_participants - details.participants.length;
 
         // Create participants HTML with delete icons instead of bullet points
-        const participantsHTML =
-          details.participants.length > 0
-            ? `<div class="participants-section">
+        const participantsHTML = details.participants.length > 0
+          ? `<div class="participants-section">
               <h5>Participants:</h5>
               <ul class="participants-list">
                 ${details.participants
                   .map(
                     (email) =>
-                      `<li><span class="participant-email">${email}</span><button class="delete-btn" data-activity="${name}" data-email="${email}">❌</button></li>`
+                      `<li><span class="participant-email">${email}</span>${
+                        isAdmin
+                          ? `<button class="delete-btn" data-activity="${name}" data-email="${email}">❌</button>`
+                          : ""
+                      }</li>`
                   )
                   .join("")}
               </ul>
             </div>`
-            : `<p><em>No participants yet</em></p>`;
+          : `<p><em>No participants yet</em></p>`;
 
         activityCard.innerHTML = `
           <h4>${name}</h4>
@@ -57,9 +111,11 @@ document.addEventListener("DOMContentLoaded", () => {
       });
 
       // Add event listeners to delete buttons
-      document.querySelectorAll(".delete-btn").forEach((button) => {
-        button.addEventListener("click", handleUnregister);
-      });
+      if (isAdmin) {
+        document.querySelectorAll(".delete-btn").forEach((button) => {
+          button.addEventListener("click", handleUnregister);
+        });
+      }
     } catch (error) {
       activitiesList.innerHTML =
         "<p>Failed to load activities. Please try again later.</p>";
@@ -69,6 +125,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Handle unregister functionality
   async function handleUnregister(event) {
+    if (!isAdmin) {
+      showMessage("Admin mode is required to unregister students.", "error");
+      return;
+    }
+
     const button = event.target;
     const activity = button.getAttribute("data-activity");
     const email = button.getAttribute("data-email");
@@ -86,26 +147,14 @@ document.addEventListener("DOMContentLoaded", () => {
       const result = await response.json();
 
       if (response.ok) {
-        messageDiv.textContent = result.message;
-        messageDiv.className = "success";
-
+        showMessage(result.message, "success");
         // Refresh activities list to show updated participants
         fetchActivities();
       } else {
-        messageDiv.textContent = result.detail || "An error occurred";
-        messageDiv.className = "error";
+        showMessage(result.detail || "An error occurred", "error");
       }
-
-      messageDiv.classList.remove("hidden");
-
-      // Hide message after 5 seconds
-      setTimeout(() => {
-        messageDiv.classList.add("hidden");
-      }, 5000);
     } catch (error) {
-      messageDiv.textContent = "Failed to unregister. Please try again.";
-      messageDiv.className = "error";
-      messageDiv.classList.remove("hidden");
+      showMessage("Failed to unregister. Please try again.", "error");
       console.error("Error unregistering:", error);
     }
   }
@@ -130,31 +179,85 @@ document.addEventListener("DOMContentLoaded", () => {
       const result = await response.json();
 
       if (response.ok) {
-        messageDiv.textContent = result.message;
-        messageDiv.className = "success";
+        showMessage(result.message, "success");
         signupForm.reset();
 
         // Refresh activities list to show updated participants
         fetchActivities();
       } else {
-        messageDiv.textContent = result.detail || "An error occurred";
-        messageDiv.className = "error";
+        showMessage(result.detail || "An error occurred", "error");
       }
-
-      messageDiv.classList.remove("hidden");
-
-      // Hide message after 5 seconds
-      setTimeout(() => {
-        messageDiv.classList.add("hidden");
-      }, 5000);
     } catch (error) {
-      messageDiv.textContent = "Failed to sign up. Please try again.";
-      messageDiv.className = "error";
-      messageDiv.classList.remove("hidden");
+      showMessage("Failed to sign up. Please try again.", "error");
       console.error("Error signing up:", error);
     }
   });
 
+  userMenuToggle.addEventListener("click", () => {
+    adminPanel.classList.toggle("hidden");
+  });
+
+  adminLoginBtn.addEventListener("click", () => {
+    openLoginModal();
+  });
+
+  adminLogoutBtn.addEventListener("click", async () => {
+    try {
+      const response = await fetch("/admin/logout", { method: "POST" });
+      const result = await response.json();
+      if (response.ok) {
+        isAdmin = false;
+        renderAdminControls();
+        fetchActivities();
+        showMessage(result.message, "success");
+      } else {
+        showMessage(result.detail || "Logout failed", "error");
+      }
+    } catch (error) {
+      showMessage("Logout failed", "error");
+      console.error("Error logging out:", error);
+    }
+  });
+
+  adminLoginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    try {
+      const response = await fetch("/admin/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ password: adminPasswordInput.value }),
+      });
+      const result = await response.json();
+
+      if (response.ok) {
+        isAdmin = true;
+        renderAdminControls();
+        closeLoginModal();
+        fetchActivities();
+        showMessage(result.message, "success");
+      } else {
+        showMessage(result.detail || "Login failed", "error");
+      }
+    } catch (error) {
+      showMessage("Login failed", "error");
+      console.error("Error logging in:", error);
+    }
+  });
+
+  loginCancelBtn.addEventListener("click", () => {
+    closeLoginModal();
+  });
+
+  loginModal.addEventListener("click", (event) => {
+    if (event.target === loginModal) {
+      closeLoginModal();
+    }
+  });
+
   // Initialize app
+  await fetchAdminStatus();
   fetchActivities();
 });
