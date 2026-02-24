@@ -5,14 +5,25 @@ A super simple FastAPI application that allows students to view and sign up
 for extracurricular activities at Mergington High School.
 """
 
-from fastapi import FastAPI, HTTPException
+from typing import Optional
+
+from fastapi import Cookie, FastAPI, HTTPException, Response, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 import os
 from pathlib import Path
 
 app = FastAPI(title="Mergington High School API",
               description="API for viewing and signing up for extracurricular activities")
+
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "mergington-admin")
+ADMIN_SESSION_COOKIE = "admin_session"
+ADMIN_SESSION_VALUE = "authenticated"
+
+
+class AdminLoginRequest(BaseModel):
+    password: str
 
 # Mount the static files directory
 current_dir = Path(__file__).parent
@@ -88,6 +99,36 @@ def get_activities():
     return activities
 
 
+def is_admin_session(admin_session: Optional[str]) -> bool:
+    return admin_session == ADMIN_SESSION_VALUE
+
+
+@app.get("/admin/status")
+def admin_status(admin_session: Optional[str] = Cookie(default=None)):
+    return {"is_admin": is_admin_session(admin_session)}
+
+
+@app.post("/admin/login")
+def admin_login(payload: AdminLoginRequest, response: Response):
+    if payload.password != ADMIN_PASSWORD:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="Invalid admin password")
+
+    response.set_cookie(
+        key=ADMIN_SESSION_COOKIE,
+        value=ADMIN_SESSION_VALUE,
+        httponly=True,
+        samesite="lax",
+    )
+    return {"message": "Admin mode enabled"}
+
+
+@app.post("/admin/logout")
+def admin_logout(response: Response):
+    response.delete_cookie(ADMIN_SESSION_COOKIE)
+    return {"message": "Admin mode disabled"}
+
+
 @app.post("/activities/{activity_name}/signup")
 def signup_for_activity(activity_name: str, email: str):
     """Sign up a student for an activity"""
@@ -111,8 +152,15 @@ def signup_for_activity(activity_name: str, email: str):
 
 
 @app.delete("/activities/{activity_name}/unregister")
-def unregister_from_activity(activity_name: str, email: str):
+def unregister_from_activity(activity_name: str, email: str,
+                             admin_session: Optional[str] = Cookie(default=None)):
     """Unregister a student from an activity"""
+    if not is_admin_session(admin_session):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin mode is required to unregister students"
+        )
+
     # Validate activity exists
     if activity_name not in activities:
         raise HTTPException(status_code=404, detail="Activity not found")
